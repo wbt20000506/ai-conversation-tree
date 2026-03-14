@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT对话树",
+  "version": "1.20.0",
+  "description": "在 ChatGPT 页面显示可搜索、可折叠的对话树面板。",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://api.openai.com/*",
+    "https://generativelanguage.googleapis.com/*",
+    "https://api.anthropic.com/*",
+    "https://api.deepseek.com/*",
+    "https://api.xiaomimimo.com/*",
+    "https://*/*",
+    "http://*/*"
+  ],
+  "action": {
+    "default_title": "ChatGPT 对话树面板",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    },
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
+      "js": [
+        "content-core.js",
+        "hard-algorithm.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
