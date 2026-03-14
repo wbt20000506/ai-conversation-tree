@@ -288,6 +288,7 @@
   width: auto;
   min-width: 100%;
   display: block;
+  pointer-events: auto;
 }
 
 .cgpt-tree-body::-webkit-scrollbar {
@@ -330,6 +331,7 @@
   fill: var(--cgpt-tree-node-user);
   stroke: rgba(4, 12, 18, 0.55);
   stroke-width: 1.5px;
+  pointer-events: none;
 }
 
 .cgpt-tree-node:hover .cgpt-tree-hitbox {
@@ -396,6 +398,7 @@
 .cgpt-tree-node-label {
   fill: var(--cgpt-tree-text);
   font-size: 12px;
+  pointer-events: none;
 }
 
 .cgpt-tree-node-order {
@@ -406,7 +409,8 @@
 }
 
 .cgpt-tree-hitbox {
-  fill: transparent;
+  fill: rgba(0, 0, 0, 0.001);
+  pointer-events: all;
 }
 
 .cgpt-tree-hover-tooltip {

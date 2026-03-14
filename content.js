@@ -1,6 +1,7 @@
 (function () {
   "use strict";
 
+  const RUNTIME_KEY = "__CGPT_TREE_RUNTIME__";
   const PANEL_ID = "cgpt-tree-panel";
   const CURRENT_ATTR = "data-cgpt-tree-current";
   const STORAGE_PREFIX = "cgpt_tree_state_v2:";
@@ -99,12 +100,33 @@
       ghostEl: null
     },
     hoverTooltipEl: null,
-    suppressClickUntil: 0
+    suppressClickUntil: 0,
+    cleanupFns: [],
+    suppressedTitleAttrs: [],
+    suppressedSvgTitles: []
+  };
+
+  const previousRuntime = globalThis[RUNTIME_KEY];
+  if (previousRuntime && typeof previousRuntime.destroy === "function") {
+    try {
+      previousRuntime.destroy();
+    } catch (error) {
+      console.warn("ChatGPT Tree Panel: failed to destroy previous runtime", error);
+    }
+  }
+
+  globalThis[RUNTIME_KEY] = {
+    destroy
   };
 
   boot();
 
   function boot() {
+    document.querySelectorAll("#" + PANEL_ID + ", .cgpt-tree-hover-tooltip, .cgpt-tree-drag-ghost").forEach((node) => {
+      if (node?.remove) {
+        node.remove();
+      }
+    });
     state.siteType = detectSiteType();
     state.chatKey = getChatKey();
     state.tree = loadTree();
@@ -113,6 +135,57 @@
     bindGlobalWatchers();
     observeConversation();
     scheduleScan(80);
+  }
+
+  function addCleanup(fn) {
+    if (typeof fn === "function") {
+      state.cleanupFns.push(fn);
+    }
+  }
+
+  function destroy() {
+    window.clearTimeout(state.scanTimer);
+    window.clearTimeout(state.saveTimer);
+    window.clearTimeout(state.activeTimer);
+    window.clearInterval(state.urlTimer);
+    state.scanTimer = null;
+    state.saveTimer = null;
+    state.activeTimer = null;
+    state.urlTimer = null;
+
+    if (state.observer) {
+      state.observer.disconnect();
+      state.observer = null;
+    }
+
+    while (state.cleanupFns.length) {
+      const fn = state.cleanupFns.pop();
+      try {
+        fn();
+      } catch (error) {
+        console.warn("ChatGPT Tree Panel: cleanup failed", error);
+      }
+    }
+
+    if (state.drag.ghostEl?.isConnected) {
+      state.drag.ghostEl.remove();
+    }
+    state.drag.ghostEl = null;
+
+    if (state.hoverTooltipEl?.isConnected) {
+      state.hoverTooltipEl.remove();
+    }
+    state.hoverTooltipEl = null;
+    restoreSuppressedNativeTooltips();
+
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) {
+      panel.remove();
+    }
+
+    if (globalThis[RUNTIME_KEY]?.destroy === destroy) {
+      delete globalThis[RUNTIME_KEY];
+    }
   }
 
   function getChatKey() {
@@ -434,8 +507,11 @@
     });
 
     window.addEventListener("pointermove", handleDragMove);
+    addCleanup(() => window.removeEventListener("pointermove", handleDragMove));
     window.addEventListener("pointerup", handleDragEnd);
+    addCleanup(() => window.removeEventListener("pointerup", handleDragEnd));
     window.addEventListener("pointercancel", handleDragEnd);
+    addCleanup(() => window.removeEventListener("pointercancel", handleDragEnd));
   }
 
   function applyPanelState() {
@@ -493,34 +569,44 @@
       window.clearTimeout(state.activeTimer);
       state.activeTimer = window.setTimeout(updateActiveNodeFromViewport, ACTIVE_DEBOUNCE_MS);
     };
-
-    window.addEventListener("scroll", scheduleActiveViewportUpdate, { passive: true });
-    document.addEventListener("scroll", scheduleActiveViewportUpdate, { passive: true, capture: true });
-
-    window.addEventListener("resize", () => {
+    const handleResize = () => {
       window.clearTimeout(state.activeTimer);
       state.activeTimer = window.setTimeout(() => renderTree(), ACTIVE_DEBOUNCE_MS);
-    });
-
-    window.addEventListener("pagehide", () => {
+    };
+    const handlePageHide = () => {
       window.clearTimeout(state.saveTimer);
       flushTreeState();
-    });
+    };
+    const handlePopState = () => {
+      if (location.href !== state.lastKnownUrl) {
+        state.lastKnownUrl = location.href;
+        handleConversationChange();
+      }
+    };
+    const handleHashChange = () => {
+      if (location.href !== state.lastKnownUrl) {
+        state.lastKnownUrl = location.href;
+        handleConversationChange();
+      }
+    };
+
+    window.addEventListener("scroll", scheduleActiveViewportUpdate, { passive: true });
+    addCleanup(() => window.removeEventListener("scroll", scheduleActiveViewportUpdate, { passive: true }));
+    document.addEventListener("scroll", scheduleActiveViewportUpdate, { passive: true, capture: true });
+    addCleanup(() => document.removeEventListener("scroll", scheduleActiveViewportUpdate, { passive: true, capture: true }));
+
+    window.addEventListener("resize", handleResize);
+    addCleanup(() => window.removeEventListener("resize", handleResize));
+
+    window.addEventListener("pagehide", handlePageHide);
+    addCleanup(() => window.removeEventListener("pagehide", handlePageHide));
 
     // 监听popstate和hashchange事件，确保第一时间捕获SPA导航
-    window.addEventListener("popstate", () => {
-      if (location.href !== state.lastKnownUrl) {
-        state.lastKnownUrl = location.href;
-        handleConversationChange();
-      }
-    });
+    window.addEventListener("popstate", handlePopState);
+    addCleanup(() => window.removeEventListener("popstate", handlePopState));
 
-    window.addEventListener("hashchange", () => {
-      if (location.href !== state.lastKnownUrl) {
-        state.lastKnownUrl = location.href;
-        handleConversationChange();
-      }
-    });
+    window.addEventListener("hashchange", handleHashChange);
+    addCleanup(() => window.removeEventListener("hashchange", handleHashChange));
 
     state.urlTimer = window.setInterval(() => {
       if (location.href === state.lastKnownUrl) {
@@ -2277,29 +2363,36 @@
     const now = Date.now();
     let parentId = state.tree.rootId;
     const seenNodeIds = new Set();
+    const seenSignatures = new Set();
+    const seenPromptIndices = new Set();
     const signatureNodeMap = new Map();
 
     for (let index = 0; index < entries.length; index += 1) {
       const entry = entries[index];
       const resolvedParentId = resolveParentId(parentId, entry, signatureNodeMap);
-      const node = findOrCreateNode(resolvedParentId, entry, index, now, signatureNodeMap);
+      const originalPromptIndex = Number.isFinite(entry.originalPromptIndex) ? entry.originalPromptIndex : index;
+      const node = findOrCreateNode(resolvedParentId, entry, originalPromptIndex, now, signatureNodeMap);
       node.title = entry.title;
       node.answer = entry.answer;
       node.signature = entry.signature;
       if (entry.askedAt) {
         node.askedAt = entry.askedAt;
       }
-      node.promptIndex = Number.isFinite(entry.originalPromptIndex) ? entry.originalPromptIndex : index;
+      node.promptIndex = originalPromptIndex;
       node.updatedAt = now;
       node.lastSeenAt = now;
       state.domNodeMap.set(node.id, entry.promptEl);
       entry.promptEl.dataset.cgptTreeNodeId = node.id;
       seenNodeIds.add(node.id);
+      if (entry.signature) {
+        seenSignatures.add(entry.signature);
+      }
+      seenPromptIndices.add(originalPromptIndex);
       signatureNodeMap.set(entry.signature, node.id);
       parentId = node.id;
     }
 
-    pruneNodes(seenNodeIds, now);
+    pruneNodes(seenNodeIds, seenSignatures, seenPromptIndices, now);
     rebuildChildren(state.tree);
     saveTree();
   }
@@ -2399,8 +2492,22 @@
       .filter(Boolean);
   }
 
-  function pruneNodes(seenNodeIds, timestamp) {
+  function pruneNodes(seenNodeIds, seenSignatures, seenPromptIndices, timestamp) {
     const tree = state.tree;
+
+    // Remove stale duplicates when a node was manually moved and then re-scanned.
+    for (const node of Object.values(tree.nodes)) {
+      if (node.id === tree.rootId || seenNodeIds.has(node.id)) {
+        continue;
+      }
+
+      const hasSeenSignature = Boolean(node.signature) && seenSignatures.has(node.signature);
+      const hasSeenPromptIndex = Number.isInteger(node.promptIndex) && seenPromptIndices.has(node.promptIndex);
+      if (hasSeenSignature || hasSeenPromptIndex) {
+        removeNode(node.id);
+      }
+    }
+
     const allNodes = Object.values(tree.nodes)
       .filter((node) => node.id !== tree.rootId)
       .sort((a, b) => (a.updatedAt - b.updatedAt) || (a.createdAt - b.createdAt));
@@ -2691,6 +2798,15 @@
     const isActive = item.id === state.activeNodeId;
     const fullTitle = normalizeText(node.title || "") || "未命名提示词";
     const displayTitle = getNodeDisplayTitle(node);
+    const bodyWidth = Math.max(
+      Number(state.body?.clientWidth) || 0,
+      Number(state.body?.scrollWidth) || 0,
+      640
+    );
+    const hitboxWidth = Math.max(
+      bodyWidth,
+      estimateNodeLabelWidth(formatNodeOrder(node), displayTitle) + 120
+    );
     const showFullTitleOnHover = displayTitle !== fullTitle;
     const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
     const classNames = ["cgpt-tree-node"];
@@ -2720,13 +2836,11 @@
     hitbox.setAttribute("class", "cgpt-tree-hitbox");
     hitbox.setAttribute("x", "-26");
     hitbox.setAttribute("y", "-16");
-    hitbox.setAttribute("width", "320");
+    hitbox.setAttribute("width", String(hitboxWidth));
     hitbox.setAttribute("height", "34");
-    hitbox.addEventListener("pointerdown", (event) => {
-      if (event.button !== 0) {
-        return;
-      }
-      beginPointerGesture(item.id, event, "");
+    bindNodeInteraction(hitbox, item.id, {
+      jumpNodeId: item.id,
+      tooltipText: showFullTitleOnHover ? fullTitle : ""
     });
     group.appendChild(hitbox);
 
@@ -2738,9 +2852,6 @@
     circle.setAttribute("cx", "0");
     circle.setAttribute("cy", "0");
     circle.setAttribute("r", "8");
-    bindNodeInteraction(circle, item.id, {
-      jumpNodeId: item.id
-    });
     group.appendChild(circle);
 
     const order = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -2749,9 +2860,6 @@
     order.setAttribute("y", "3");
     order.setAttribute("text-anchor", "middle");
     order.textContent = formatNodeOrder(node);
-    bindNodeInteraction(order, item.id, {
-      jumpNodeId: item.id
-    });
     group.appendChild(order);
 
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
@@ -2759,15 +2867,6 @@
     label.setAttribute("x", "18");
     label.setAttribute("y", "4");
     label.textContent = displayTitle;
-    bindNodeInteraction(label, item.id, {
-      jumpNodeId: item.id,
-      tooltipText: showFullTitleOnHover ? fullTitle : ""
-    });
-    if (showFullTitleOnHover) {
-      const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-      title.textContent = fullTitle;
-      label.appendChild(title);
-    }
     group.appendChild(label);
 
     return group;
@@ -3036,6 +3135,7 @@
     if (!tooltip || tooltip.hidden) {
       return;
     }
+    suppressNativeTooltipsAtPoint(event.clientX, event.clientY);
     tooltip.style.left = event.clientX + 14 + "px";
     tooltip.style.top = event.clientY + 14 + "px";
   }
@@ -3044,6 +3144,7 @@
     if (!text || state.drag.dragging) {
       return;
     }
+    suppressNativeTooltipsAtPoint(event.clientX, event.clientY);
     const tooltip = ensureHoverTooltip();
     tooltip.textContent = text;
     tooltip.hidden = false;
@@ -3055,6 +3156,70 @@
       return;
     }
     state.hoverTooltipEl.hidden = true;
+    restoreSuppressedNativeTooltips();
+  }
+
+  function suppressNativeTooltipsAtPoint(clientX, clientY) {
+    restoreSuppressedNativeTooltips();
+    if (typeof document.elementsFromPoint !== "function") {
+      return;
+    }
+
+    const seen = new Set();
+    const elements = document.elementsFromPoint(clientX, clientY);
+    for (const element of elements) {
+      let current = element;
+      while (current && current !== document.documentElement && !seen.has(current)) {
+        seen.add(current);
+        suppressNativeTooltipForElement(current);
+        current = current.parentElement;
+      }
+    }
+  }
+
+  function suppressNativeTooltipForElement(element) {
+    if (!(element instanceof Element)) {
+      return;
+    }
+
+    if (element.hasAttribute("title")) {
+      state.suppressedTitleAttrs.push({
+        element,
+        value: element.getAttribute("title")
+      });
+      element.removeAttribute("title");
+    }
+
+    if (element.namespaceURI !== "http://www.w3.org/2000/svg") {
+      return;
+    }
+
+    const directTitleChildren = Array.from(element.children || []).filter((child) => child.localName === "title");
+    for (const titleEl of directTitleChildren) {
+      state.suppressedSvgTitles.push({
+        parent: element,
+        titleEl
+      });
+      titleEl.remove();
+    }
+  }
+
+  function restoreSuppressedNativeTooltips() {
+    while (state.suppressedTitleAttrs.length) {
+      const entry = state.suppressedTitleAttrs.pop();
+      if (!entry?.element?.isConnected) {
+        continue;
+      }
+      entry.element.setAttribute("title", entry.value || "");
+    }
+
+    while (state.suppressedSvgTitles.length) {
+      const entry = state.suppressedSvgTitles.pop();
+      if (!entry?.parent?.isConnected || !entry?.titleEl) {
+        continue;
+      }
+      entry.parent.appendChild(entry.titleEl);
+    }
   }
 
   function moveNode(nodeId, nextParentId) {
