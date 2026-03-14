@@ -18,6 +18,7 @@
   const GITHUB_COPILOT_TOP_BUFFER = 144;
   const SCROLL_CORRECTION_DELAY_MS = 180;
   const SCROLL_CORRECTION_MAX_ATTEMPTS = 2;
+  const MANUAL_ACTIVE_NODE_HOLD_MS = 1600;
   const SITE_TYPE_CHATGPT = "chatgpt";
   const SITE_TYPE_UNKNOWN = "unknown";
   const EMPTY_TREE = Object.freeze({
@@ -105,7 +106,9 @@
     suppressClickUntil: 0,
     cleanupFns: [],
     suppressedTitleAttrs: [],
-    suppressedSvgTitles: []
+    suppressedSvgTitles: [],
+    manualActiveNodeId: null,
+    manualActiveUntil: 0
   };
 
   const previousRuntime = globalThis[RUNTIME_KEY];
@@ -4093,6 +4096,7 @@
     });
     const previousActiveNodeId = state.activeNodeId;
     state.activeNodeId = nodeId;
+    pinManualActiveNode(nodeId);
     const layoutChanged = revealAncestors(nodeId);
     applyActiveHighlight();
     if (layoutChanged) {
@@ -4334,6 +4338,14 @@
   }
 
   function updateActiveNodeFromViewport() {
+    if (
+      state.manualActiveNodeId &&
+      state.activeNodeId === state.manualActiveNodeId &&
+      Date.now() < state.manualActiveUntil
+    ) {
+      return;
+    }
+
     let best = null;
     const center = window.innerHeight / 2;
 
@@ -4354,9 +4366,20 @@
     if (best && best.nodeId !== state.activeNodeId) {
       const previousActiveNodeId = state.activeNodeId;
       state.activeNodeId = best.nodeId;
+      clearManualActiveNodePin();
       applyActiveHighlight();
       updateRenderedActiveNodeClasses(previousActiveNodeId, best.nodeId);
     }
+  }
+
+  function pinManualActiveNode(nodeId) {
+    state.manualActiveNodeId = nodeId || null;
+    state.manualActiveUntil = Date.now() + MANUAL_ACTIVE_NODE_HOLD_MS;
+  }
+
+  function clearManualActiveNodePin() {
+    state.manualActiveNodeId = null;
+    state.manualActiveUntil = 0;
   }
 
   function syncRenderedActiveNodeClasses() {
