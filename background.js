@@ -25,12 +25,12 @@ const DEFAULT_ENDPOINTS = Object.freeze({
 });
 
 const MODEL_CANDIDATES = Object.freeze({
-  [API_TYPES.OPENAI]: ["gpt-5.2", "gpt-5.1", "gpt-5-mini", "gpt-4.1-mini"],
+  [API_TYPES.OPENAI]: ["gpt-5-mini", "gpt-4.1-mini", "gpt-5.2", "gpt-5.1"],
   [API_TYPES.GEMINI]: ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"],
-  [API_TYPES.CLAUDE]: ["claude-sonnet-4-20250514", "claude-3-7-sonnet-20250219", "claude-3-5-haiku-20241022"],
+  [API_TYPES.CLAUDE]: ["claude-3-5-haiku-20241022", "claude-sonnet-4-20250514", "claude-3-7-sonnet-20250219"],
   [API_TYPES.DEEPSEEK]: ["deepseek-chat", "deepseek-reasoner"],
   [API_TYPES.MIMO]: ["mimo-v2-flash", "mimo-v2-pro"],
-  [API_TYPES.CUSTOM]: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o-mini", "deepseek-chat"]
+  [API_TYPES.CUSTOM]: ["gpt-4.1-mini", "gpt-4o-mini", "gpt-4.1", "deepseek-chat"]
 });
 
 chrome.runtime.onInstalled.addListener(() => {

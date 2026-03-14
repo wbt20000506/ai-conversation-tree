@@ -13,27 +13,27 @@ const API_META = Object.freeze({
   openai: {
     keyLabel: "OpenAI API Key",
     keyPlaceholder: "请输入 OpenAI API Key",
-    hint: "推荐模型：gpt-5.2 或 gpt-5-mini，也兼容 gpt-4.1 系列。"
+    hint: "优先推荐较快模型：gpt-5-mini 或 gpt-4.1-mini；需要更强能力时再用 gpt-5.2。"
   },
   gemini: {
     keyLabel: "Gemini API Key",
     keyPlaceholder: "请输入 Gemini API Key",
-    hint: "推荐模型：gemini-2.5-flash，可手动填写其他 Gemini 模型。"
+    hint: "优先推荐较快模型：gemini-2.5-flash，也可填写 gemini-2.0-flash。"
   },
   claude: {
     keyLabel: "Claude API Key",
     keyPlaceholder: "请输入 Claude API Key",
-    hint: "推荐模型：claude-sonnet-4-20250514，也兼容 claude-3-7-sonnet-20250219。"
+    hint: "优先推荐较快模型：claude-3-5-haiku-20241022；需要更强能力时再用 Sonnet。"
   },
   deepseek: {
     keyLabel: "DeepSeek API Key",
     keyPlaceholder: "请输入 DeepSeek API Key",
-    hint: "推荐模型：deepseek-chat；如需推理模式可填写 deepseek-reasoner。"
+    hint: "优先推荐较快模型：deepseek-chat；仅在需要推理时再用 deepseek-reasoner。"
   },
   mimo: {
     keyLabel: "MiMo API Key",
     keyPlaceholder: "请输入 MiMo API Key",
-    hint: "使用小米 MiMo API 进行语义分析，端点：api.xiaomimimo.com。"
+    hint: "优先推荐较快模型：mimo-v2-flash；需要更强能力时再用 mimo-v2-pro。"
   },
   custom: {
     keyLabel: "自定义 API Key",
