@@ -791,6 +791,7 @@
     state.scanInFlight = true;
     const scanRequestId = ++state.scanRequestId;
     try {
+      const shouldUseAI = typeof requireAI === "boolean" ? requireAI : await hasConfiguredApiKey();
       const entries = filterIgnoredEntries(extractPromptEntries());
       const fingerprint = JSON.stringify(entries.map((entry) => [entry.analysisId, entry.signature, entry.answerSignature]));
       if (!forceRender && !forceRefresh && fingerprint === state.lastScanFingerprint) {
@@ -799,13 +800,13 @@
       }
 
       state.lastScanFingerprint = fingerprint;
-      const shouldShowAIBusy = Boolean(forceRefresh || requireAI);
+      const shouldShowAIBusy = Boolean(shouldUseAI);
       let analyzedEntries = entries;
       if (shouldShowAIBusy) {
         setAIAnalysisBusy(true);
       }
       try {
-        analyzedEntries = await analyzeEntriesWithAI(entries, fingerprint, forceRefresh, Boolean(requireAI));
+        analyzedEntries = await analyzeEntriesWithAI(entries, fingerprint, forceRefresh, shouldUseAI);
       } finally {
         if (shouldShowAIBusy) {
           setAIAnalysisBusy(false);
@@ -4605,6 +4606,10 @@
       state.lastAIRelationships = [];
       state.lastAITreeSnapshot = null;
       return entries;
+    }
+
+    if (!requireAI) {
+      return applySavedTreeHints(entries, state.savedTreeBase || null);
     }
 
     // 如果不是强制刷新，且指纹匹配且有缓存结果，则直接使用缓存
