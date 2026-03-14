@@ -18,7 +18,7 @@ const API_TYPES = Object.freeze({
 const DEFAULT_API_TYPE = API_TYPES.GEMINI;
 const DEFAULT_ENDPOINTS = Object.freeze({
   [API_TYPES.OPENAI]: "https://api.openai.com/v1/chat/completions",
-  [API_TYPES.GEMINI]: "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+  [API_TYPES.GEMINI]: "https://generativelanguage.googleapis.com/v1beta",
   [API_TYPES.CLAUDE]: "https://api.anthropic.com/v1/messages",
   [API_TYPES.DEEPSEEK]: "https://api.deepseek.com/v1/chat/completions",
   [API_TYPES.MIMO]: "https://api.xiaomimimo.com/anthropic/v1/messages"
@@ -26,7 +26,7 @@ const DEFAULT_ENDPOINTS = Object.freeze({
 
 const MODEL_CANDIDATES = Object.freeze({
   [API_TYPES.OPENAI]: ["gpt-4o", "gpt-4", "gpt-3.5-turbo"],
-  [API_TYPES.GEMINI]: ["gemini-pro"],
+  [API_TYPES.GEMINI]: ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"],
   [API_TYPES.CLAUDE]: ["claude-3-5-sonnet-latest"],
   [API_TYPES.DEEPSEEK]: ["deepseek-chat"],
   [API_TYPES.MIMO]: ["mimo-v2-flash", "mimo-v2-pro"],
@@ -190,7 +190,7 @@ function resolveApiKey(stored) {
 
 const FAST_MODELS = Object.freeze({
   [API_TYPES.OPENAI]: ["gpt-4o-mini", "gpt-3.5-turbo"],
-  [API_TYPES.GEMINI]: ["gemini-1.5-flash"],
+  [API_TYPES.GEMINI]: ["gemini-2.5-flash", "gemini-2.0-flash"],
   [API_TYPES.CLAUDE]: ["claude-3-5-haiku-latest"],
   [API_TYPES.DEEPSEEK]: ["deepseek-chat"],
   [API_TYPES.MIMO]: ["mimo-v2-flash"],
@@ -198,30 +198,14 @@ const FAST_MODELS = Object.freeze({
 });
 
 async function callProviderWithFallbackModels(config, prompt) {
-  // 如果用户选择了模型，优先使用用户选择的模型
-  // 否则使用快速模型，然后再尝试其他模型
-  const fastModels = FAST_MODELS[config.apiType] || FAST_MODELS[API_TYPES.OPENAI];
-  const fallbackModels = config.selectedModel
+  const preferredModels = config.selectedModel
     ? [config.selectedModel]
-    : (MODEL_CANDIDATES[config.apiType] || MODEL_CANDIDATES[API_TYPES.OPENAI]);
+    : (FAST_MODELS[config.apiType] || FAST_MODELS[API_TYPES.OPENAI]);
+  const fallbackModels = MODEL_CANDIDATES[config.apiType] || MODEL_CANDIDATES[API_TYPES.OPENAI];
+  const modelsToTry = Array.from(new Set(preferredModels.concat(fallbackModels).filter(Boolean)));
 
-  // 先尝试快速模型
-  for (const model of fastModels) {
-    const result = await callProvider(config, prompt, model);
-    if (result.ok) {
-      return {
-        ...result,
-        model
-      };
-    }
-    if (!shouldTryNextModel(result)) {
-      break;
-    }
-  }
-
-  // 快速模型失败，尝试其他模型
   let lastFailure = null;
-  for (const model of fallbackModels) {
+  for (const model of modelsToTry) {
     const result = await callProvider(config, prompt, model);
     if (result.ok) {
       return {
@@ -322,7 +306,7 @@ function buildProviderRequest(config, prompt, model) {
     case API_TYPES.CUSTOM:
       return buildOpenAICompatibleRequest(config, prompt, model);
     case API_TYPES.GEMINI:
-      return buildGeminiRequest(config, prompt);
+      return buildGeminiRequest(config, prompt, model);
     case API_TYPES.CLAUDE:
       return buildClaudeRequest(config, prompt, model);
     case API_TYPES.MIMO:
@@ -360,13 +344,20 @@ function buildOpenAICompatibleRequest(config, prompt, model) {
   };
 }
 
-function buildGeminiRequest(config, prompt) {
+function buildGeminiRequest(config, prompt, model) {
+  const resolvedModel = String(model || config.selectedModel || "gemini-2.5-flash").trim() || "gemini-2.5-flash";
+  const endpoint = String(config.endpoint || DEFAULT_ENDPOINTS[API_TYPES.GEMINI]).trim().replace(/\/+$/, "");
+  const url = /:generateContent$/.test(endpoint)
+    ? endpoint
+    : endpoint + "/models/" + encodeURIComponent(resolvedModel) + ":generateContent";
+
   return {
-    url: config.endpoint + "?key=" + encodeURIComponent(config.apiKey),
+    url,
     options: {
       method: "POST",
       headers: {
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "x-goog-api-key": config.apiKey
       },
       body: JSON.stringify({
         contents: [

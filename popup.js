@@ -18,7 +18,7 @@ const API_META = Object.freeze({
   gemini: {
     keyLabel: "Gemini API Key",
     keyPlaceholder: "请输入 Gemini API Key",
-    hint: "使用 Gemini Pro 接口进行语义分析。"
+    hint: "推荐模型：gemini-2.5-flash，可手动填写其他 Gemini 模型。"
   },
   claude: {
     keyLabel: "Claude API Key",
