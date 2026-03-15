@@ -937,7 +937,6 @@
     const nextTree = createTree();
     nextTree.panelCollapsed = Boolean(state.tree?.panelCollapsed);
     nextTree.panelPosition = normalizePanelPosition(state.tree?.panelPosition);
-    nextTree.panelSize = normalizePanelSize(state.tree?.panelSize);
     state.tree = nextTree;
     state.activeNodeId = null;
     state.manualActiveNodeId = null;
