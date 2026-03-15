@@ -18,19 +18,19 @@ body {
 }
 
 .popup {
-  padding: 14px;
+  padding: 12px;
 }
 
 .popup-card,
 .popup-note {
   border: 1px solid var(--popup-border);
-  border-radius: 18px;
+  border-radius: 28px;
   background: rgba(18, 27, 37, 0.92);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
 }
 
 .popup-card {
-  padding: 16px;
+  padding: 18px;
 }
 
 .popup-eyebrow {
@@ -56,14 +56,14 @@ h1 {
 .popup-status {
   display: inline-flex;
   align-items: center;
-  min-height: 24px;
+  min-height: 22px;
   margin: 12px 0 10px;
-  padding: 0 10px;
+  padding: 0 9px;
   border-radius: 999px;
   border: 1px solid var(--popup-border);
   background: rgba(255, 255, 255, 0.05);
   color: var(--popup-muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -82,17 +82,18 @@ h1 {
 .popup-actions {
   display: flex;
   gap: 8px;
-  margin-top: 14px;
+  margin-top: 12px;
 }
 
 button {
   appearance: none;
   border: 1px solid var(--popup-border);
-  border-radius: 12px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.06);
   color: var(--popup-text);
-  padding: 10px 12px;
-  font: inherit;
+  padding: 8px 11px;
+  font: 13px/1.25 "SF Pro Display", "Segoe UI", ui-sans-serif, sans-serif;
+  font-weight: 600;
   cursor: pointer;
 }
 
@@ -107,7 +108,7 @@ button:hover {
 
 .popup-note {
   margin-top: 12px;
-  padding: 14px 16px;
+  padding: 16px 18px;
 }
 
 .popup-note strong {
