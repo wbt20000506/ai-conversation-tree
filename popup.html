@@ -10,10 +10,17 @@
     <main class="popup">
       <section class="popup-card">
         <div class="popup-eyebrow">AI对话树</div>
-        <h1>当前对话设置</h1>
-        <p class="popup-subtitle" id="conversation-title">正在读取当前对话…</p>
-        <div class="popup-status" id="status-badge">读取中</div>
-        <p class="popup-message" id="status-message">正在检查这个对话是否被关闭。</p>
+        <div class="popup-heading">
+          <h1>当前对话设置</h1>
+          <p class="popup-subtitle" id="conversation-title">正在读取当前对话…</p>
+        </div>
+        <div class="popup-status-row">
+          <span class="popup-status-label">状态</span>
+          <div class="popup-status" id="status-badge">读取中</div>
+        </div>
+        <div class="popup-message-card">
+          <p class="popup-message" id="status-message">正在检查这个对话是否被关闭。</p>
+        </div>
         <div class="popup-actions">
           <button type="button" id="enable-button" hidden>开启此对话</button>
           <button type="button" id="refresh-button">重新检测</button>
