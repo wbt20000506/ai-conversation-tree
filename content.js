@@ -1199,7 +1199,7 @@
   }
 
   function getGeminiConversationTurns() {
-    const candidates = getOrderedRoleCandidates([
+    const candidates = getOrderedRoleCandidatesDeep([
       { role: "user", selector: "user-query" },
       { role: "assistant", selector: "model-response" },
       { role: "user", selector: "message-content[user-query]" },
@@ -1216,7 +1216,7 @@
         .filter(Boolean);
     }
 
-    return getGenericConversationTurns([
+    return getGenericConversationTurnsDeep([
       'chat-window',
       'conversation-container',
       '[data-test-id*="conversation"]',
