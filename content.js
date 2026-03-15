@@ -28,6 +28,7 @@
   const AI_INCREMENTAL_MAX_COUNT = 12;
   const SITE_TYPE_CHATGPT = "chatgpt";
   const SITE_TYPE_GEMINI = "gemini";
+  const SITE_TYPE_GITHUB_COPILOT = "github-copilot";
   const SITE_TYPE_UNKNOWN = "unknown";
   const EMPTY_TREE = Object.freeze({
     rootId: "root",
