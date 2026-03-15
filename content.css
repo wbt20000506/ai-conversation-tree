@@ -64,6 +64,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  cursor: grab;
 }
 
 .cgpt-tree-header-actions,
@@ -92,10 +93,21 @@
   min-width: 0;
 }
 
+#cgpt-tree-panel.cgpt-tree-panel-dragging .cgpt-tree-header-top {
+  cursor: grabbing;
+}
+
 .cgpt-tree-title strong {
   font-size: 15px;
   line-height: 1.15;
   letter-spacing: 0.02em;
+}
+
+.cgpt-tree-drag-hint {
+  font-size: 10px;
+  color: var(--cgpt-tree-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .cgpt-tree-ai-badge {

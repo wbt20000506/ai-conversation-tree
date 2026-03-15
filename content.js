@@ -30,6 +30,7 @@
   const EMPTY_TREE = Object.freeze({
     rootId: "root",
     panelCollapsed: false,
+    panelPosition: null,
     searchQuery: "",
     ignoredPromptIndices: [],
     ignoredSignatures: [],
@@ -113,6 +114,14 @@
       currentY: 0,
       dragging: false,
       ghostEl: null
+    },
+    panelDrag: {
+      pointerId: null,
+      startX: 0,
+      startY: 0,
+      originLeft: 0,
+      originTop: 0,
+      active: false
     },
     hoverTooltipEl: null,
     suppressClickUntil: 0,
@@ -288,6 +297,7 @@
     const tree = createTree();
     tree.version = Number.isFinite(input?.version) ? input.version : 0;
     tree.panelCollapsed = Boolean(input && input.panelCollapsed);
+    tree.panelPosition = normalizePanelPosition(input?.panelPosition);
     tree.searchQuery = typeof input?.searchQuery === "string" ? input.searchQuery : "";
     tree.ignoredPromptIndices = Array.isArray(input?.ignoredPromptIndices)
       ? Array.from(new Set(input.ignoredPromptIndices.filter((value) => Number.isInteger(value) && value >= 0)))
@@ -324,6 +334,21 @@
     return tree;
   }
 
+  function normalizePanelPosition(input) {
+    if (!input || typeof input !== "object") {
+      return null;
+    }
+    const left = Number(input.left);
+    const top = Number(input.top);
+    if (!Number.isFinite(left) || !Number.isFinite(top)) {
+      return null;
+    }
+    return {
+      left: Math.max(0, Math.round(left)),
+      top: Math.max(0, Math.round(top))
+    };
+  }
+
   function rebuildChildren(tree) {
     for (const node of Object.values(tree.nodes)) {
       node.children = [];
@@ -357,9 +382,9 @@
       panel.id = PANEL_ID;
       panel.innerHTML = [
         '<div class="cgpt-tree-header">',
-        '  <div class="cgpt-tree-header-top">',
+        '  <div class="cgpt-tree-header-top" data-role="panel-drag-handle">',
         '    <div class="cgpt-tree-title">',
-        '      <div class="cgpt-tree-title-line"><strong>对话树</strong></div>',
+        '      <div class="cgpt-tree-title-line"><strong>对话树</strong><span class="cgpt-tree-drag-hint">可拖动</span></div>',
         "    </div>",
         '    <button type="button" class="cgpt-tree-toggle-button" data-role="toggle">折叠</button>',
         "  </div>",
@@ -443,6 +468,11 @@
       }
       return element;
     };
+
+    const dragHandle = state.panel.querySelector('[data-role="panel-drag-handle"]');
+    if (dragHandle) {
+      dragHandle.addEventListener("pointerdown", beginPanelDrag);
+    }
 
     bindClick("toggle", () => {
       state.tree.panelCollapsed = !state.tree.panelCollapsed;
@@ -540,6 +570,7 @@
 
   function applyPanelState() {
     const collapsed = state.tree.panelCollapsed;
+    applyStoredPanelPosition();
     state.panel.classList.toggle("cgpt-tree-collapsed", collapsed);
     state.body.classList.toggle("cgpt-tree-hidden", collapsed);
     state.panel.querySelector(".cgpt-tree-header-actions").classList.toggle("cgpt-tree-hidden", collapsed);
@@ -605,6 +636,7 @@
       state.activeTimer = window.setTimeout(updateActiveNodeFromViewport, ACTIVE_DEBOUNCE_MS);
     };
     const handleResize = () => {
+      clampStoredPanelPosition();
       window.clearTimeout(state.activeTimer);
       state.activeTimer = window.setTimeout(() => renderTree(), ACTIVE_DEBOUNCE_MS);
     };
@@ -3121,6 +3153,10 @@
   }
 
   function handleDragMove(event) {
+    if (state.panelDrag.active && event.pointerId === state.panelDrag.pointerId) {
+      updatePanelDrag(event);
+      return;
+    }
     if (!state.drag.sourceId || event.pointerId !== state.drag.pointerId) {
       return;
     }
@@ -3147,6 +3183,10 @@
   }
 
   function handleDragEnd(event) {
+    if (state.panelDrag.active && event.pointerId === state.panelDrag.pointerId) {
+      finishPanelDrag();
+      return;
+    }
     if (!state.drag.sourceId || event.pointerId !== state.drag.pointerId) {
       return;
     }
@@ -3269,6 +3309,120 @@
       dragging: false,
       ghostEl: null
     };
+  }
+
+  function beginPanelDrag(event) {
+    if (event.button !== 0 || !state.panel) {
+      return;
+    }
+    const interactive = event.target?.closest?.("button, input, select, textarea, a, [data-role]");
+    if (interactive && interactive !== event.currentTarget) {
+      return;
+    }
+    const rect = state.panel.getBoundingClientRect();
+    state.panelDrag.pointerId = event.pointerId;
+    state.panelDrag.startX = event.clientX;
+    state.panelDrag.startY = event.clientY;
+    state.panelDrag.originLeft = rect.left;
+    state.panelDrag.originTop = rect.top;
+    state.panelDrag.active = true;
+    state.panel.classList.add("cgpt-tree-panel-dragging");
+    state.panel.style.right = "auto";
+    state.panel.style.bottom = "auto";
+    state.panel.style.left = rect.left + "px";
+    state.panel.style.top = rect.top + "px";
+    if (typeof event.currentTarget.setPointerCapture === "function") {
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      } catch (error) {
+        console.warn("ChatGPT Tree Panel: failed to capture panel drag pointer", error);
+      }
+    }
+    event.preventDefault();
+  }
+
+  function updatePanelDrag(event) {
+    if (!state.panelDrag.active || !state.panel) {
+      return;
+    }
+    const deltaX = event.clientX - state.panelDrag.startX;
+    const deltaY = event.clientY - state.panelDrag.startY;
+    const nextPosition = clampPanelPosition(
+      state.panelDrag.originLeft + deltaX,
+      state.panelDrag.originTop + deltaY
+    );
+    applyPanelPosition(nextPosition.left, nextPosition.top, false);
+  }
+
+  function finishPanelDrag() {
+    if (!state.panelDrag.active) {
+      return;
+    }
+    state.panelDrag.active = false;
+    if (state.panel) {
+      state.panel.classList.remove("cgpt-tree-panel-dragging");
+    }
+    const rect = state.panel?.getBoundingClientRect();
+    if (rect) {
+      state.tree.panelPosition = clampPanelPosition(rect.left, rect.top);
+      saveTree();
+    }
+    state.panelDrag.pointerId = null;
+  }
+
+  function clampPanelPosition(left, top) {
+    const panelWidth = state.panel?.offsetWidth || 388;
+    const panelHeight = state.panel?.offsetHeight || 420;
+    const margin = 12;
+    const maxLeft = Math.max(margin, window.innerWidth - panelWidth - margin);
+    const maxTop = Math.max(margin, window.innerHeight - panelHeight - margin);
+    return {
+      left: Math.min(Math.max(Math.round(left), margin), maxLeft),
+      top: Math.min(Math.max(Math.round(top), margin), maxTop)
+    };
+  }
+
+  function applyPanelPosition(left, top, persist) {
+    if (!state.panel) {
+      return;
+    }
+    const nextPosition = clampPanelPosition(left, top);
+    state.panel.style.left = nextPosition.left + "px";
+    state.panel.style.top = nextPosition.top + "px";
+    state.panel.style.right = "auto";
+    state.panel.style.bottom = "auto";
+    if (persist) {
+      state.tree.panelPosition = nextPosition;
+      saveTree();
+    }
+  }
+
+  function applyStoredPanelPosition() {
+    if (!state.panel) {
+      return;
+    }
+    const position = normalizePanelPosition(state.tree.panelPosition);
+    if (!position) {
+      state.panel.style.left = "";
+      state.panel.style.top = "";
+      state.panel.style.right = "";
+      state.panel.style.bottom = "";
+      return;
+    }
+    applyPanelPosition(position.left, position.top, false);
+  }
+
+  function clampStoredPanelPosition() {
+    const position = normalizePanelPosition(state.tree.panelPosition);
+    if (!position) {
+      return;
+    }
+    const nextPosition = clampPanelPosition(position.left, position.top);
+    applyPanelPosition(nextPosition.left, nextPosition.top, false);
+    if (nextPosition.left !== position.left || nextPosition.top !== position.top) {
+      state.tree.panelPosition = nextPosition;
+      saveTree();
+    }
   }
 
   function ensureHoverTooltip() {
