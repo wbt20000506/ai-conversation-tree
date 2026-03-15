@@ -1,3 +1,5 @@
 .DS_Store
 output/
 .playwright-cli/
+test-results/
+playwright-report/

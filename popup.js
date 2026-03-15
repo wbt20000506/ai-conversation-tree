@@ -42,14 +42,32 @@
         mode
       });
     } catch (error) {
-      setStatus({
-        title: "未检测到对话树脚本",
-        badge: "不可用",
-        message: "当前页面还没有加载到对话树扩展，请刷新页面后再试。",
-        enable: false,
-        closed: false
-      });
-      return;
+      const injected = await ensureContentScriptInjected(tab.id);
+      if (!injected) {
+        setStatus({
+          title: "未检测到对话树脚本",
+          badge: "不可用",
+          message: "当前页面还没有加载到对话树扩展，请刷新页面后再试。",
+          enable: false,
+          closed: false
+        });
+        return;
+      }
+      try {
+        response = await chrome.tabs.sendMessage(tab.id, {
+          type: mode ? "cgpt-tree-set-conversation-status" : "cgpt-tree-get-conversation-status",
+          mode
+        });
+      } catch (secondError) {
+        setStatus({
+          title: "脚本注入失败",
+          badge: "不可用",
+          message: "已尝试重新注入对话树脚本，但当前页面仍未响应。请刷新页面后再试。",
+          enable: false,
+          closed: false
+        });
+        return;
+      }
     }
 
     const closed = Boolean(response?.closed);
@@ -84,5 +102,30 @@
   async function getCurrentTab() {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
     return tabs[0] || null;
+  }
+
+  async function ensureContentScriptInjected(tabId) {
+    if (!chrome.scripting?.executeScript || !chrome.scripting?.insertCSS) {
+      return false;
+    }
+    try {
+      await chrome.scripting.insertCSS({
+        target: { tabId },
+        files: ["content.css"]
+      });
+    } catch (error) {
+      console.warn("ChatGPT Tree Panel: failed to inject CSS", error);
+    }
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        files: ["hard-algorithm.js", "content.js"]
+      });
+      return true;
+    } catch (error) {
+      console.warn("ChatGPT Tree Panel: failed to inject scripts", error);
+      return false;
+    }
   }
 })();
