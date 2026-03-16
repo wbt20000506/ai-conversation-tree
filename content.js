@@ -136,7 +136,8 @@
     manualActiveUntil: 0,
     isConversationTemporarilyClosed: false,
     isConversationPermanentlyClosed: false,
-    closeStateLoaded: false
+    closeStateLoaded: false,
+    workSuspended: false
   };
 
   const previousRuntime = globalThis[RUNTIME_KEY];
@@ -684,6 +685,9 @@
 
   function bindGlobalWatchers() {
     const scheduleActiveViewportUpdate = () => {
+      if (isConversationClosed()) {
+        return;
+      }
       if (state.aiAnalysisInFlight) {
         return;
       }
@@ -766,6 +770,9 @@
     }
 
     state.observer = new MutationObserver((mutations) => {
+      if (state.workSuspended || isConversationClosed()) {
+        return;
+      }
       if (state.panel && mutations.every((mutation) => state.panel.contains(mutation.target))) {
         return;
       }
@@ -828,6 +835,9 @@
   }
 
   function scheduleScan(delay) {
+    if (state.workSuspended || isConversationClosed()) {
+      return;
+    }
     window.clearTimeout(state.scanTimer);
     if (state.aiAnalysisInFlight) {
       queueDeferredScan(delay, {
@@ -953,6 +963,9 @@
   }
 
   async function scanConversation(forceRender, forceRefresh, requireAI) {
+    if (state.workSuspended || isConversationClosed()) {
+      return;
+    }
     if (state.scanInFlight) {
       queueDeferredScan(0, {
         forceRender,
@@ -3037,6 +3050,32 @@
     return Boolean(state.isConversationTemporarilyClosed || state.isConversationPermanentlyClosed);
   }
 
+  function setConversationWorkSuspended(shouldSuspend) {
+    const nextValue = Boolean(shouldSuspend);
+    if (state.workSuspended === nextValue) {
+      return;
+    }
+    state.workSuspended = nextValue;
+
+    if (state.workSuspended) {
+      window.clearTimeout(state.scanTimer);
+      state.scanTimer = null;
+      state.deferredScanDelay = null;
+      state.deferredScanRequest = null;
+      state.scanInFlight = false;
+      state.aiAnalysisInFlight = false;
+
+      if (state.observer) {
+        state.observer.disconnect();
+      }
+      updateBusyControls();
+      return;
+    }
+
+    observeConversation();
+    scheduleScan(120);
+  }
+
   async function syncConversationClosedState() {
     const closable = isConversationClosable();
     let temporaryClosed = false;
@@ -3065,7 +3104,14 @@
     state.panel.hidden = hidden;
     if (hidden) {
       hideHoverTooltip();
+      if (state.activeNodeId) {
+        state.activeNodeId = null;
+        clearManualActiveNodePin();
+      }
+      applyActiveHighlight();
+      syncRenderedActiveNodeClasses();
     }
+    setConversationWorkSuspended(hidden);
     if (state.closeMenu) {
       state.closeMenu.classList.add("cgpt-tree-hidden");
     }
@@ -4831,6 +4877,15 @@
   }
 
   function updateActiveNodeFromViewport() {
+    if (isConversationClosed()) {
+      if (state.activeNodeId) {
+        state.activeNodeId = null;
+        clearManualActiveNodePin();
+        applyActiveHighlight();
+        syncRenderedActiveNodeClasses();
+      }
+      return;
+    }
     if (
       state.manualActiveNodeId &&
       state.activeNodeId === state.manualActiveNodeId &&
