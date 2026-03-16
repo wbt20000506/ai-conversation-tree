@@ -12,6 +12,12 @@
   const SCAN_DEBOUNCE_MS_LARGE_TREE = 1200;
   const SCAN_DEBOUNCE_MS_AI = 900;
   const SCAN_DEBOUNCE_MS_AI_LARGE_TREE = 1600;
+  // ChatGPT/Gemini often stream tokens continuously, which can keep a pure debounce
+  // from ever firing. We throttle scans so new user turns appear promptly.
+  const SCAN_THROTTLE_MS = 700;
+  const SCAN_THROTTLE_MS_LARGE_TREE = 1200;
+  const SCAN_THROTTLE_MS_AI = 1000;
+  const SCAN_THROTTLE_MS_AI_LARGE_TREE = 1600;
   const ACTIVE_DEBOUNCE_MS = 120;
   const SAVE_DEBOUNCE_MS = 180;
   const URL_POLL_MS = 900;
@@ -35,6 +41,7 @@
     panelCollapsed: false,
     panelPosition: null,
     searchQuery: "",
+    linearSortEnabled: false,
     ignoredPromptIndices: [],
     ignoredSignatures: [],
     ignoredTitles: [],
@@ -86,12 +93,14 @@
     observer: null,
     urlTimer: null,
     scanTimer: null,
+    scanDueAt: 0,
     saveTimer: null,
     activeTimer: null,
     scanInFlight: false,
     deferredScanDelay: null,
     deferredScanRequest: null,
     aiAnalysisInFlight: false,
+    lastScanStartedAt: 0,
     renderedFingerprint: "",
     renderVersion: 0,
     treeStructureVersion: 0,
@@ -152,7 +161,20 @@
   }
 
   globalThis[RUNTIME_KEY] = {
-    destroy
+    destroy,
+    diagnostics: () => ({
+      href: location.href,
+      siteType: state.siteType,
+      chatKey: state.chatKey,
+      workSuspended: state.workSuspended,
+      isClosed: isConversationClosed(),
+      hasObserver: Boolean(state.observer),
+      hasPanel: Boolean(document.getElementById(PANEL_ID)),
+      scanInFlight: state.scanInFlight,
+      aiAnalysisInFlight: state.aiAnalysisInFlight,
+      scanDueAt: state.scanDueAt || 0,
+      lastScanStartedAt: state.lastScanStartedAt || 0
+    })
   };
 
   boot();
@@ -353,6 +375,7 @@
     tree.panelCollapsed = Boolean(input && input.panelCollapsed);
     tree.panelPosition = normalizePanelPosition(input?.panelPosition);
     tree.searchQuery = typeof input?.searchQuery === "string" ? input.searchQuery : "";
+    tree.linearSortEnabled = Boolean(input?.linearSortEnabled);
     tree.ignoredPromptIndices = Array.isArray(input?.ignoredPromptIndices)
       ? Array.from(new Set(input.ignoredPromptIndices.filter((value) => Number.isInteger(value) && value >= 0)))
       : [];
@@ -912,19 +935,30 @@
   }
 
   function resetScanState() {
+    window.clearTimeout(state.scanTimer);
+    state.scanTimer = null;
     state.scanInFlight = false;
     state.deferredScanDelay = null;
     state.deferredScanRequest = null;
     state.aiAnalysisInFlight = false;
+    state.scanDueAt = 0;
     state.scanRequestId += 1;
     updateBusyControls();
+  }
+
+  function getScanThrottleIntervalMs() {
+    const nodeCount = Math.max(0, Object.keys(state.tree?.nodes || {}).length - 1);
+    const hasAIConfig = state.lastAIEntrySignatures.length > 0 || Boolean(state.lastAIFingerprint);
+    if (hasAIConfig) {
+      return nodeCount > 24 ? SCAN_THROTTLE_MS_AI_LARGE_TREE : SCAN_THROTTLE_MS_AI;
+    }
+    return nodeCount > 24 ? SCAN_THROTTLE_MS_LARGE_TREE : SCAN_THROTTLE_MS;
   }
 
   function scheduleScan(delay) {
     if (state.workSuspended || isConversationClosed()) {
       return;
     }
-    window.clearTimeout(state.scanTimer);
     if (state.aiAnalysisInFlight) {
       queueDeferredScan(delay, {
         forceRender: false,
@@ -933,9 +967,31 @@
       });
       return;
     }
+
+    const now = Date.now();
+    const desiredDelay = Math.max(0, Number.isFinite(delay) ? delay : 0);
+    const throttleMs = getScanThrottleIntervalMs();
+    const earliestAllowedAt = state.lastScanStartedAt ? (state.lastScanStartedAt + throttleMs) : now;
+    const desiredAt = Math.max(now + desiredDelay, earliestAllowedAt);
+    const finalDelay = Math.max(0, desiredAt - now);
+
+    // Don't let a constant stream of mutations postpone scanning forever.
+    // Keep the earliest scheduled scan; reschedule only if the new request is earlier.
+    if (state.scanTimer != null && state.scanDueAt) {
+      if (desiredAt >= state.scanDueAt) {
+        return;
+      }
+      window.clearTimeout(state.scanTimer);
+      state.scanTimer = null;
+      state.scanDueAt = 0;
+    }
+
+    state.scanDueAt = desiredAt;
     state.scanTimer = window.setTimeout(() => {
+      state.scanTimer = null;
+      state.scanDueAt = 0;
       void scanConversation(false);
-    }, delay);
+    }, finalDelay);
   }
 
   function queueDeferredScan(delay, request) {
@@ -1023,6 +1079,7 @@
   function resetPendingScanWork() {
     window.clearTimeout(state.scanTimer);
     state.scanTimer = null;
+    state.scanDueAt = 0;
     state.scanRequestId += 1;
     state.scanInFlight = false;
     state.deferredScanDelay = null;
@@ -1061,6 +1118,7 @@
       });
       return;
     }
+    state.lastScanStartedAt = Date.now();
     state.scanInFlight = true;
     updateBusyControls();
     const scanRequestId = ++state.scanRequestId;
@@ -1256,12 +1314,18 @@
     const conversationNodes = getVisibleTopLevelNodes([
       'article[data-testid^="conversation-turn-"]',
       'article[data-testid*="conversation-turn"]',
+      'div[data-testid^="conversation-turn-"]',
+      'div[data-testid*="conversation-turn"]',
       'article[data-turn]',
       'article[data-turn-id]'
     ].join(","), main);
 
     if (!conversationNodes.length) {
-      return [];
+      // ChatGPT has changed its DOM structure multiple times; fall back to generic extraction.
+      return getGenericConversationTurnsDeep([
+        "main",
+        '[role="main"]'
+      ]);
     }
 
     const nodes = conversationNodes.filter((node) => {
@@ -2766,7 +2830,11 @@
     }
 
     pruneNodes(seenNodeIds, seenSignatures, seenPromptIndices, now);
-    rebuildChildren(state.tree);
+    if (state.tree.linearSortEnabled) {
+      applyLinearSortMode(false);
+    } else {
+      rebuildChildren(state.tree);
+    }
     markTreeStructureDirty();
     saveTree();
   }
@@ -3159,6 +3227,11 @@
   function setConversationWorkSuspended(shouldSuspend) {
     const nextValue = Boolean(shouldSuspend);
     if (state.workSuspended === nextValue) {
+      // The extension starts with workSuspended=false. Ensure we still attach the observer on first boot
+      // (and after any case where the observer was disconnected but the flag didn't change).
+      if (!nextValue) {
+        observeConversation();
+      }
       return;
     }
     state.workSuspended = nextValue;
@@ -4848,6 +4921,32 @@
     }
 
     captureUndoState();
+    state.tree.linearSortEnabled = true;
+
+    applyLinearSortMode(true);
+
+    markTreeStructureDirty();
+    updateSearchResults(false);
+    saveTree();
+    state.renderVersion += 1;
+    renderTree();
+    if (state.activeNodeId) {
+      scrollTreeNodeIntoView(state.activeNodeId, { alignX: "start" });
+    }
+  }
+
+  function applyLinearSortMode(ensureRoot) {
+    if (!state.tree) {
+      return;
+    }
+    const rootId = state.tree.rootId || "root";
+    const root = state.tree.nodes[rootId] || state.tree.nodes.root;
+    if (!root) {
+      return;
+    }
+    if (ensureRoot) {
+      root.parentId = null;
+    }
 
     const nodes = Object.values(state.tree.nodes)
       .filter((node) => node && node.id !== rootId)
@@ -4866,15 +4965,6 @@
       node.children = [];
       node.collapsed = false;
       root.children.push(node.id);
-    }
-
-    markTreeStructureDirty();
-    updateSearchResults(false);
-    saveTree();
-    state.renderVersion += 1;
-    renderTree();
-    if (state.activeNodeId) {
-      scrollTreeNodeIntoView(state.activeNodeId, { alignX: "start" });
     }
   }
 

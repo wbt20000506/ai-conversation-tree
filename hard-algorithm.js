@@ -10,7 +10,11 @@
 
     for (const turn of Array.isArray(turns) ? turns : []) {
       const role = turn?.role;
-      const text = normalizeBlockText(turn?.text || "");
+      // Prefer assistant markdown so we can reliably detect headings/bold markers.
+      const rawText = role === "assistant"
+        ? (turn?.markdown || turn?.text || "")
+        : (turn?.text || "");
+      const text = normalizeBlockText(rawText);
       if (!text) {
         continue;
       }
@@ -26,6 +30,7 @@
           title: promptText,
           fullText: promptText,
           answer: "",
+          answerSketch: "",
           signature: buildSignature(promptText),
           answerSignature: "",
           promptEl: turn?.promptEl || null,
@@ -38,7 +43,15 @@
 
       if (role === "assistant" && currentPrompt) {
         currentPrompt.answer = normalizeBlockText([currentPrompt.answer, text].filter(Boolean).join("\n"));
-        currentPrompt.answerSignature = buildSignature(currentPrompt.answer);
+
+        const sketchPart = extractAnswerSketch(text);
+        if (sketchPart) {
+          currentPrompt.answerSketch = normalizeBlockText([currentPrompt.answerSketch, sketchPart].filter(Boolean).join("\n"));
+        }
+
+        // Only use compact sketch (bold lines + small headings) for algorithm/fingerprint.
+        const signatureSource = currentPrompt.answerSketch || currentPrompt.answer;
+        currentPrompt.answerSignature = buildSignature(signatureSource);
         if (!answeredPrompts.includes(currentPrompt)) {
           answeredPrompts.push(currentPrompt);
         }
@@ -46,6 +59,10 @@
     }
 
     return entries;
+  }
+
+  function getCandidateAnswerForMatch(candidate) {
+    return normalizeBlockText(candidate?.answerSketch || candidate?.answer || "");
   }
 
   function findPromptParentMatch(promptText, answeredPrompts) {
@@ -57,11 +74,12 @@
 
     for (let index = answeredPrompts.length - 1; index >= 0; index -= 1) {
       const candidate = answeredPrompts[index];
-      if (!candidate?.answer) {
+      const candidateAnswer = getCandidateAnswerForMatch(candidate);
+      if (!candidateAnswer) {
         continue;
       }
 
-      const pointMatch = matchPromptToAnswerPoint(promptText, candidate.answer);
+      const pointMatch = matchPromptToAnswerPoint(promptText, candidateAnswer);
       if (!pointMatch) {
         continue;
       }
@@ -94,6 +112,63 @@
       score: 0,
       mode: "root"
     };
+  }
+
+  function extractAnswerSketch(answerText) {
+    const text = normalizeBlockText(answerText);
+    if (!text) {
+      return "";
+    }
+
+    const lines = text
+      .split(/\n+/)
+      .map((line) => line.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+
+    const picked = [];
+    let totalChars = 0;
+
+    const pushLine = (value) => {
+      const normalized = normalizeText(value);
+      if (!normalized) {
+        return;
+      }
+      if (picked.length >= 28 || totalChars >= 1600) {
+        return;
+      }
+      picked.push(normalized);
+      totalChars += normalized.length;
+    };
+
+    for (const rawLine of lines) {
+      const line = rawLine.replace(/^\s*(?:>\s*)?/, "").trim();
+      if (!line) {
+        continue;
+      }
+
+      // Markdown headings (small titles)
+      const mdHeading = line.match(/^#{1,4}\s+(.+)$/);
+      if (mdHeading) {
+        pushLine(mdHeading[1]);
+        continue;
+      }
+
+      // "一、二、1." style short section headings
+      const shortHeading = line.match(/^(?:\d{1,3}[.)、]|[一二三四五六七八九十]+[、.）)]|[①②③④⑤⑥⑦⑧⑨⑩])\s*([^:：]{2,28})$/);
+      if (shortHeading) {
+        pushLine(shortHeading[1]);
+        continue;
+      }
+
+      // Lines that are essentially a bold title, optionally with a short explanation.
+      const boldMatch = line.match(/^(?:[-*•·▪◦]\s*)?(?:\*\*|__)([^*_]+?)(?:\*\*|__)\s*(?:[：:.-]\s*(.+))?$/);
+      if (boldMatch) {
+        pushLine([boldMatch[1], boldMatch[2]].filter(Boolean).join("："));
+        continue;
+      }
+    }
+
+    return picked.join("\n").trim();
   }
 
   function matchPromptToAnswerPoint(promptText, answerText) {
@@ -387,7 +462,7 @@
   function scorePromptContinuation(rawPromptText, promptVariant, candidate) {
     const promptCore = stripPromptIntent(stripQuestionSuffix(promptVariant)) || promptVariant;
     const previousPrompt = stripPromptIntent(stripQuestionSuffix(normalizeForMatch(candidate.fullText || candidate.title || "")));
-    const previousAnswer = normalizeForMatch(candidate.answer || "");
+    const previousAnswer = normalizeForMatch(getCandidateAnswerForMatch(candidate));
     const promptSimilarity = getTextSimilarityScore(promptCore, previousPrompt) + 4;
     const answerOverlap = getTokenOverlapScore(promptCore, previousAnswer);
     const answerCoverage = getTokenCoverageScore(promptCore, previousAnswer);
