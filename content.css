@@ -267,7 +267,8 @@
 
 .cgpt-tree-search {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 1 1 180px;
+  max-width: 240px;
   appearance: none;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 8px;
@@ -285,6 +286,16 @@
 .cgpt-tree-search:focus {
   border-color: rgba(88, 196, 220, 0.65);
   box-shadow: 0 0 0 2px rgba(88, 196, 220, 0.14);
+}
+
+.cgpt-tree-search-button {
+  min-width: 56px;
+  white-space: nowrap;
+}
+
+.cgpt-tree-search-button.is-cancel {
+  background: rgba(247, 185, 85, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(247, 185, 85, 0.22);
 }
 
 .cgpt-tree-export-select {

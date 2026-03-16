@@ -72,10 +72,12 @@
     activeNodeId: null,
     searchResults: [],
     searchIndex: -1,
+    searchDraft: "",
     domNodeMap: new Map(),
     panel: null,
     body: null,
     searchInput: null,
+    searchApplyButton: null,
     summary: null,
     resultBadge: null,
     toggleButton: null,
@@ -435,6 +437,7 @@
         '<div class="cgpt-tree-toolbar">',
         '  <div class="cgpt-tree-toolbar-row cgpt-tree-toolbar-search-row">',
         '    <input type="search" class="cgpt-tree-search" data-role="search" placeholder="搜索问题标题" />',
+        '    <button type="button" class="cgpt-tree-search-button" data-role="search-apply" title="搜索（Enter）" aria-label="搜索">搜索</button>',
         '    <button type="button" data-role="search-prev" title="上一个匹配">上一个</button>',
         '    <button type="button" data-role="search-next" title="下一个匹配">下一个</button>',
         "  </div>",
@@ -474,6 +477,7 @@
     state.panel = panel;
     state.body = panel.querySelector(".cgpt-tree-body");
     state.searchInput = panel.querySelector('[data-role="search"]');
+    state.searchApplyButton = panel.querySelector('[data-role="search-apply"]');
     state.summary = panel.querySelector(".cgpt-tree-summary");
     state.resultBadge = panel.querySelector(".cgpt-tree-result-badge");
     state.toggleButton = panel.querySelector('[data-role="toggle"]');
@@ -485,6 +489,7 @@
 
     bindPanelEvents();
     state.searchInput.value = state.tree.searchQuery || "";
+    state.searchDraft = state.searchInput.value || "";
     updateSearchResults(false);
     applyPanelState();
     updateExportModeOptions();
@@ -575,11 +580,22 @@
       moveSearch(-1);
     });
 
+    const applySearchDraft = (direction) => {
+      const nextQuery = (state.searchDraft || "").trim();
+      const currentQuery = String(state.tree.searchQuery || "");
+      if (nextQuery !== currentQuery) {
+        state.tree.searchQuery = nextQuery;
+        updateSearchResults(true);
+        saveTree();
+        renderTree();
+        return;
+      }
+      moveSearch(typeof direction === "number" ? direction : 1);
+    };
+
     state.searchInput.addEventListener("input", () => {
-      state.tree.searchQuery = state.searchInput.value.trim();
-      updateSearchResults(true);
-      saveTree();
-      renderTree();
+      state.searchDraft = state.searchInput.value || "";
+      updateResultBadge();
     });
 
     state.searchInput.addEventListener("keydown", (event) => {
@@ -587,7 +603,22 @@
         return;
       }
       event.preventDefault();
-      moveSearch(event.shiftKey ? -1 : 1);
+      applySearchDraft(event.shiftKey ? -1 : 1);
+    });
+
+    bindClick("search-apply", () => {
+      const pendingQuery = (state.searchDraft || "").trim();
+      const appliedQuery = String(state.tree.searchQuery || "").trim();
+      if (pendingQuery === appliedQuery && appliedQuery) {
+        state.tree.searchQuery = "";
+        state.searchDraft = "";
+        state.searchInput.value = "";
+        updateSearchResults(false);
+        saveTree();
+        renderTree();
+        return;
+      }
+      applySearchDraft(1);
     });
 
     state.panel.querySelector('[data-role="export-format"]').addEventListener("change", (event) => {
@@ -657,6 +688,7 @@
       : null;
     if (state.searchInput) {
       state.searchInput.value = state.tree.searchQuery || "";
+      state.searchDraft = state.searchInput.value || "";
     }
     state.lastAIFingerprint = "";
     state.lastAIRelationships = [];
@@ -815,6 +847,7 @@
       state.body.innerHTML = "";
     }
     state.searchInput.value = state.tree.searchQuery || "";
+    state.searchDraft = state.searchInput.value || "";
     updateSearchResults(false);
     // 加载保存的树
     void loadSavedTreeBase();
@@ -956,6 +989,7 @@
     state.searchIndex = -1;
     if (state.searchInput) {
       state.searchInput.value = "";
+      state.searchDraft = "";
     }
     updateSearchResults(false);
     state.renderedFingerprint = "";
@@ -2877,8 +2911,27 @@
     if (!state.resultBadge) {
       return;
     }
+
+    const pendingQuery = normalizeText(state.searchDraft || "");
+    const appliedQuery = normalizeText(state.tree.searchQuery || "");
+
+    if (state.searchApplyButton) {
+      const shouldCancel = pendingQuery === appliedQuery && Boolean(appliedQuery);
+      state.searchApplyButton.textContent = shouldCancel ? "取消" : "搜索";
+      state.searchApplyButton.title = shouldCancel ? "取消搜索" : "搜索（Enter）";
+      state.searchApplyButton.setAttribute("aria-label", shouldCancel ? "取消搜索" : "搜索");
+      state.searchApplyButton.classList.toggle("is-cancel", shouldCancel);
+    }
+
+    const pendingNormalized = pendingQuery.toLowerCase();
+    const appliedNormalized = appliedQuery.toLowerCase();
+    if (pendingNormalized !== appliedNormalized) {
+      state.resultBadge.textContent = pendingNormalized ? "按 Enter 或点击搜索" : "按 Enter 或点击搜索清除";
+      return;
+    }
+
     if (!state.searchResults.length) {
-      state.resultBadge.textContent = state.tree.searchQuery ? "0 个匹配" : "未搜索";
+      state.resultBadge.textContent = appliedQuery ? "0 个匹配" : "未搜索";
       return;
     }
     const currentIndex = state.searchIndex >= 0 ? state.searchIndex : 0;
